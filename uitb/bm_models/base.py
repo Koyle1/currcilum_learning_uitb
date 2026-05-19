@@ -4,6 +4,7 @@ import pathlib
 import os
 import shutil
 import inspect
+import copy
 import mujoco
 from abc import ABC, abstractmethod
 import importlib
@@ -91,6 +92,13 @@ class BaseBMModel(ABC):
     # Get the effort model; some models might need to know dt
     self._effort_model = self.get_effort_model(kwargs.get("effort_model", {"cls": "Zero"}), dt=kwargs["dt"])
 
+    # Allow the curriculum to switch effort off without swapping the effort model class.
+    self._effort_on = kwargs.get("effort_on", True)
+
+    # Keep the reset deterministic when needed, and allow the simulator to inject an anchor state.
+    self._fixed_reset = kwargs.get("fixed_reset", False)
+    self._reset_anchor = None
+
     # Define signal-dependent noise
     self._sigdepnoise_type = kwargs.get("sigdepnoise_type", None)  #"white")
     self._sigdepnoise_level = kwargs.get("sigdepnoise_level", 0.103)
@@ -123,6 +131,32 @@ class BaseBMModel(ABC):
   def _reset(self, model, data):
     """ Resets the biomechanical model. """
 
+    # If the simulator injected an anchor, restore that exact state.
+    if self._reset_anchor is not None:
+      anchor = self._reset_anchor
+      data.qpos[:] = anchor["qpos"]
+      data.qvel[:] = anchor["qvel"]
+      data.ctrl[:] = anchor["ctrl"]
+      if anchor.get("act") is not None and self._na > 0:
+        data.act[:] = anchor["act"]
+
+      for attr in ("_motor_act", "_motor_smooth_avg", "_sigdepnoise_acc", "_constantnoise_acc"):
+        if attr in anchor and hasattr(self, attr):
+          setattr(self, attr, copy.deepcopy(anchor[attr]))
+      return
+
+    # Keep the canonical MuJoCo reset state when requested.
+    if self._fixed_reset:
+      data.ctrl[:] = 0
+      if self._na > 0:
+        data.act[self._muscle_actuators] = 0
+
+      self._motor_act = np.zeros((self._nm,))
+      self._motor_smooth_avg = np.zeros((self._nm,))
+      self._sigdepnoise_acc = 0
+      self._constantnoise_acc = 0
+      return
+
     # Randomly sample qpos, qvel, act around zero values
     nq = len(self._independent_qpos)
     qpos = self._rng.uniform(low=np.ones((nq,))*-0.05, high=np.ones((nq,))*0.05)
@@ -144,6 +178,35 @@ class BaseBMModel(ABC):
     # Reset accumulative noise
     self._sigdepnoise_acc = 0
     self._constantnoise_acc = 0
+
+  def set_reset_anchor(self, anchor):
+    """Store an externally captured reset anchor for the next reset call."""
+    self._reset_anchor = copy.deepcopy(anchor) if anchor is not None else None
+
+  def clear_reset_anchor(self):
+    """Clear any externally injected reset anchor."""
+    self._reset_anchor = None
+
+  def _capture_state_anchor(self, model, data):
+    """Capture the current simulator state so it can be restored later."""
+    anchor = {
+      "qpos": data.qpos.copy(),
+      "qvel": data.qvel.copy(),
+      "ctrl": data.ctrl.copy(),
+      "act": data.act.copy() if self._na > 0 else None,
+    }
+
+    for attr in ("_motor_act", "_motor_smooth_avg", "_sigdepnoise_acc", "_constantnoise_acc"):
+      if hasattr(self, attr):
+        anchor[attr] = copy.deepcopy(getattr(self, attr))
+
+    return anchor
+
+  def _restore_state_anchor(self, model, data, anchor):
+    """Restore a previously captured simulator state anchor."""
+    self._reset_anchor = copy.deepcopy(anchor)
+    self._reset(model, data)
+    self._reset_anchor = None
 
   def _update(self, model, data):
     """ Update the biomechanical model after a step has been taken in the simulator. """
@@ -333,6 +396,12 @@ class BaseBMModel(ABC):
   def get_effort_cost(self, model, data):
     """ Returns effort cost from the effort model. """
     return self._effort_model.cost(model, data)
+
+  @property
+  @final
+  def effort_on(self):
+    """Returns whether effort cost is currently enabled."""
+    return self._effort_on
 
   @property
   @final

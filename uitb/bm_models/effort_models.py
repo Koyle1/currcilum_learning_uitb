@@ -34,6 +34,16 @@ class BaseEffortModel(ABC):
     """
     return dict()
 
+  def _effort_enabled(self):
+    return getattr(self._bm_model, "effort_on", getattr(self._bm_model, "_effort_on", True))
+
+  def _disabled_cost(self):
+    if hasattr(self, "_effort_cost"):
+      self._effort_cost = 0.0
+    if hasattr(self, "_consumed_endurance"):
+      self._consumed_endurance = 0.0
+    return 0.0
+
 
 class Composite(BaseEffortModel):
 
@@ -42,6 +52,8 @@ class Composite(BaseEffortModel):
     self._weight = weight
 
   def cost(self, model, data):
+    if not self._effort_enabled():
+      return self._disabled_cost()
     mujoco.cymj._mj_inverse(model, data) # TODO does this work with new mujoco python bindings?
     angle_acceleration = np.sum(data.qacc[self._bm_model.independent_dofs] ** 2)
     energy = np.sum(data.qvel[self._bm_model.independent_dofs] ** 2
@@ -52,6 +64,8 @@ class Composite(BaseEffortModel):
     pass
 
   def update(self, model, data):
+    if not self._effort_enabled():
+      return
     pass
 
 
@@ -72,6 +86,8 @@ class CumulativeFatigue(BaseEffortModel):
     self._dt = dt
 
   def cost(self, model, data):
+    if not self._effort_enabled():
+      return self._disabled_cost()
 
     # Initialise MA if not yet initialised
     if self._MA is None:
@@ -115,6 +131,8 @@ class CumulativeFatigue(BaseEffortModel):
     self._MR = None
 
   def update(self, model, data):
+    if not self._effort_enabled():
+      return
     pass
 
 
@@ -139,6 +157,8 @@ class CumulativeFatigue3CCr(BaseEffortModel):
     self._effort_cost = None
 
   def cost(self, model, data):
+    if not self._effort_enabled():
+      return self._disabled_cost()
     # Calculate effort
     effort = np.linalg.norm(self._MA - self._TL)
     self._effort_cost = self._weight*effort
@@ -150,6 +170,8 @@ class CumulativeFatigue3CCr(BaseEffortModel):
     self._MF = np.zeros((model.na,))
 
   def update(self, model, data):
+    if not self._effort_enabled():
+      return
     # Get target load
     TL = data.act.copy()
     self._TL = TL
@@ -229,6 +251,8 @@ class ConsumedEndurance(BaseEffortModel):
     return minimum_endurance
     
   def cost(self, model, data):
+    if not self._effort_enabled():
+      return self._disabled_cost()
     # Calculate consumed endurance
     self._endurance = self.get_endurance(model, data)
     #total_time = data.time
@@ -247,6 +271,8 @@ class ConsumedEndurance(BaseEffortModel):
     pass
 
   def update(self, model, data):
+    if not self._effort_enabled():
+      return
     pass
 
   def _get_state(self, model, data):
@@ -262,12 +288,16 @@ class MuscleState(BaseEffortModel):
     self._weight = weight
 
   def cost(self, model, data):
+    if not self._effort_enabled():
+      return self._disabled_cost()
     return self._weight * np.sum(data.act ** 2)
 
   def reset(self, model, data):
     pass
 
   def update(self, model, data):
+    if not self._effort_enabled():
+      return
     pass
 
 
@@ -279,6 +309,8 @@ class Neural(BaseEffortModel):
     self._effort_cost = None
 
   def cost(self, model, data):
+    if not self._effort_enabled():
+      return self._disabled_cost()
     self._effort_cost = self._weight * np.sum(data.ctrl ** 2)
     return self._effort_cost
 
@@ -286,6 +318,8 @@ class Neural(BaseEffortModel):
     pass
 
   def update(self, model, data):
+    if not self._effort_enabled():
+      return
     pass
   
   def _get_state(self, model, data):

@@ -262,6 +262,8 @@ class Simulator(gym.Env):
     # (e.g. move target to a specific position wrt to a body part)
     task = task_cls(model, data, **{**task_kwargs, **callbacks, **run_parameters})
     bm_model = bm_cls(model, data, **{**bm_kwargs, **callbacks, **run_parameters})
+    if hasattr(task, "_effort_on"):
+      bm_model._effort_on = task._effort_on
     perception = Perception(model, data, bm_model, perception_modules, {**callbacks, **run_parameters})
 
     return model, data, task, bm_model, perception, callbacks
@@ -335,16 +337,19 @@ class Simulator(gym.Env):
     return _simulator
       
   def _capture_success_anchor(self):
+    if hasattr(self.bm_model, "_capture_state_anchor"):
+      return self.bm_model._capture_state_anchor(self._model, self._data)
+
     anchor = {
-        "qpos": self._data.qpos.copy(),
-        "qvel": self._data.qvel.copy(),
-        "ctrl": self._data.ctrl.copy(),
-        "act": self._data.act.copy() if self._model.na > 0 else None,
+      "qpos": self._data.qpos.copy(),
+      "qvel": self._data.qvel.copy(),
+      "ctrl": self._data.ctrl.copy(),
+      "act": self._data.act.copy() if self._model.na > 0 else None,
     }
 
     for attr in ("_motor_act", "_motor_smooth_avg", "_sigdepnoise_acc", "_constantnoise_acc"):
-        if hasattr(self.bm_model, attr):
-            anchor[attr] = copy.deepcopy(getattr(self.bm_model, attr))
+      if hasattr(self.bm_model, attr):
+        anchor[attr] = copy.deepcopy(getattr(self.bm_model, attr))
 
     return anchor
 
@@ -393,6 +398,9 @@ class Simulator(gym.Env):
     # Get run parameters: these parameters can be used to override parameters used during training
     self._run_parameters = self._config["simulation"]["run_parameters"].copy()
     self._run_parameters.update(run_parameters or {})
+    self._task_kwargs = self._config["simulation"]["task"].get("kwargs", {})
+    self._reset_policy = self._task_kwargs.get("reset_policy", "legacy")
+    self._soft_reset_budget = self._task_kwargs.get("soft_reset_budget", None)
 
     # Initialise simulation
     self._model, self._data, self.task, self.bm_model, self.perception, self.callbacks = \
@@ -406,6 +414,9 @@ class Simulator(gym.Env):
 
     # Collect some episode statistics
     self._episode_statistics = {"length (seconds)": 0, "length (steps)": 0, "reward": 0}
+    self._baseline_anchor = None
+    self._episode_start_anchor = None
+    self._soft_reset_count = 0
 
     # Initialise viewer
     self._GUI_camera = Camera(self._run_parameters["rendering_context"], self._model, self._data, camera_id='for_testing',
@@ -628,39 +639,69 @@ class Simulator(gym.Env):
     super().reset(seed=seed)
 
     hard_reset = getattr(self.task, "_needs_hard_reset", True)
+    reset_policy = getattr(self.task, "_reset_policy", self._reset_policy)
+    soft_reset_budget = getattr(self.task, "_soft_reset_budget", self._soft_reset_budget)
+
+    def _reset_to_canonical():
+      mujoco.mj_resetData(self._model, self._data)
+      if hasattr(self.bm_model, "clear_reset_anchor"):
+        self.bm_model.clear_reset_anchor()
+      self.bm_model.reset(self._model, self._data)
 
     if hard_reset:
-      # Full canonical reset
-      mujoco.mj_resetData(self._model, self._data)
-      self.bm_model.reset(self._model, self._data)
-      self.perception.reset(self._model, self._data)
-      info = self.task.reset(self._model, self._data)
+      # Full canonical reset.
+      _reset_to_canonical()
       self._last_success_anchor = None
-
+      self._baseline_anchor = self._capture_success_anchor()
+      self._episode_start_anchor = copy.deepcopy(self._baseline_anchor)
+      self._soft_reset_count = 0
     else:
-      if self._last_success_anchor is not None:
-        # After at least one success, restart from the last successful pose
-        self._restore_success_anchor(self._last_success_anchor)
+      self._soft_reset_count += 1
+
+      restore_anchor = None
+      use_canonical = False
+
+      if reset_policy == "baseline":
+        use_canonical = True
+      elif reset_policy == "episode_anchor":
+        restore_anchor = self._episode_start_anchor
+        use_canonical = restore_anchor is None
+      elif reset_policy == "episode_anchor_then_baseline":
+        if soft_reset_budget is not None and self._soft_reset_count > soft_reset_budget:
+          use_canonical = True
+          self._soft_reset_count = 0
+        else:
+          restore_anchor = self._episode_start_anchor
+          use_canonical = restore_anchor is None
+      elif reset_policy == "legacy":
+        if self._last_success_anchor is not None:
+          restore_anchor = self._last_success_anchor
+        else:
+          use_canonical = True
       else:
-        # Before the first success, restart from the canonical initial pose
-        mujoco.mj_resetData(self._model, self._data)
+        if self._last_success_anchor is not None:
+          restore_anchor = self._last_success_anchor
+        else:
+          use_canonical = True
+
+      if use_canonical:
+        _reset_to_canonical()
+        self._baseline_anchor = self._capture_success_anchor()
+        self._soft_reset_count = 0
+        if self._episode_start_anchor is None or reset_policy in {"baseline", "episode_anchor_then_baseline"}:
+          self._episode_start_anchor = copy.deepcopy(self._baseline_anchor)
+      else:
+        if hasattr(self.bm_model, "set_reset_anchor"):
+          self.bm_model.set_reset_anchor(restore_anchor)
         self.bm_model.reset(self._model, self._data)
+        if hasattr(self.bm_model, "clear_reset_anchor"):
+          self.bm_model.clear_reset_anchor()
 
-      # Reset episode-local non-physical state
-      self.bm_model._effort_model.reset(self._model, self._data)
+    self.perception.reset(self._model, self._data)
+    info = self.task.reset(self._model, self._data)
 
-      if hasattr(self.bm_model, "_sigdepnoise_acc"):
-        self.bm_model._sigdepnoise_acc = 0
-      if hasattr(self.bm_model, "_constantnoise_acc"):
-        self.bm_model._constantnoise_acc = 0
-      if hasattr(self.bm_model, "_motor_smooth_avg"):
-        self.bm_model._motor_smooth_avg = np.zeros_like(self.bm_model._motor_smooth_avg)
-
-      self.perception.reset(self._model, self._data)
-      info = self.task.reset(self._model, self._data)
-
-      self.bm_model.update(self._model, self._data)
-      mujoco.mj_forward(self._model, self._data)
+    self.bm_model.update(self._model, self._data)
+    mujoco.mj_forward(self._model, self._data)
 
     observation = self.get_observation(info)
 

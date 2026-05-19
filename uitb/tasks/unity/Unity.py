@@ -24,6 +24,11 @@ class UnityEnv(BaseTask):
 
     self._needs_hard_reset = True
     self._hard_reset_step_count = 0
+    self._curriculum_stage = kwargs.get("curriculum_stage", None)
+    self._effort_on = kwargs.get("effort_on", kwargs.get("curriculum_stage", None) != 1)
+    self._reset_policy = kwargs.get("reset_policy", "legacy")
+    self._soft_reset_budget = kwargs.get("soft_reset_budget", None)
+    self._soft_reset_count = 0
 
     # Fire up the Unity client if we're really starting the simulation and not just building
     if not kwargs.get("build", False):
@@ -71,6 +76,9 @@ class UnityEnv(BaseTask):
       # Used for logging states
       self._info = {"terminated": False,
                   "truncated": False, "unity_image": None}
+      self._info["effort_on"] = self._effort_on
+      self._info["curriculum_stage"] = self._curriculum_stage if self._curriculum_stage is not None else -1
+      self._info["soft_reset_count"] = self._soft_reset_count
 
       
 
@@ -257,6 +265,9 @@ class UnityEnv(BaseTask):
     self._info["truncated"] = truncated
     self._info["unity_image"] = obs["image"]
     self._info.update(log_dict)
+    self._info["effort_on"] = self._effort_on
+    self._info["curriculum_stage"] = self._curriculum_stage if self._curriculum_stage is not None else -1
+    self._info["soft_reset_count"] = self._soft_reset_count
 
     if wandb.run is not None:
         wandb.log(log_dict)
@@ -314,23 +325,34 @@ class UnityEnv(BaseTask):
       "leftControllerRotation": controller_left_quat,
       "rightControllerRotation": controller_right_quat,
       "currentTimestep": self._current_timestep,
-      "nextTimestep": self._current_timestep + 1/self._action_sample_freq
+      "nextTimestep": self._current_timestep + 1/self._action_sample_freq,
+      "curriculumStage": self._curriculum_stage if self._curriculum_stage is not None else -1,
+      "effortOn": self._effort_on,
+      "resetPolicy": self._reset_policy,
+      "softResetBudget": self._soft_reset_budget if self._soft_reset_budget is not None else -1,
+      "softResetCount": self._soft_reset_count,
     }
     return state
 
   def _reset(self, model, data):
-    obs = self._unity_client.reset(self._create_state(model, data))
-    self._time = obs["time"]
-
     if self._needs_hard_reset:
         self._needs_hard_reset = False
         self._hard_reset_step_count = 0
+        self._soft_reset_count = 0
+    else:
+        self._soft_reset_count += 1
+
+    obs = self._unity_client.reset(self._create_state(model, data))
+    self._time = obs["time"]
 
 
     self._info = {
         "terminated": False,
         "truncated": False,
         "unity_image": obs["image"],
+        "effort_on": self._effort_on,
+        "curriculum_stage": self._curriculum_stage if self._curriculum_stage is not None else -1,
+        "soft_reset_count": self._soft_reset_count,
     }
 
     return self._info

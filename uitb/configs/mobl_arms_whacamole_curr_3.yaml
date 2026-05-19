@@ -7,6 +7,8 @@ simulation:
     kwargs:
       shoulder_variant: "none"
       skull_rotation: [0.9961947, 0, 0, -0.0871557]
+      fixed_reset: true
+      effort_on: true
       effort_model:
         cls: "CumulativeFatigue3CCr"
         kwargs:
@@ -14,6 +16,9 @@ simulation:
   task:
     cls: "UnityEnv"
     kwargs:
+      curriculum_stage: 3
+      reset_policy: "episode_anchor_then_baseline"
+      soft_reset_budget: 4
       unity_executable: "apps/whac-a-mole-linux-curriculum-3/build.x86_64"
       app_args: ["-condition", "random-unconstrained", "-adaptive"]
       standalone: true # set to False for debugging (open the app in Unity editor)
