@@ -401,6 +401,7 @@ class Simulator(gym.Env):
     self._task_kwargs = self._config["simulation"]["task"].get("kwargs", {})
     self._reset_policy = self._task_kwargs.get("reset_policy", "legacy")
     self._soft_reset_budget = self._task_kwargs.get("soft_reset_budget", None)
+    self._subtract_effort_cost = self._run_parameters.get("subtract_effort_cost", True)
 
     # Initialise simulation
     self._model, self._data, self.task, self.bm_model, self.perception, self.callbacks = \
@@ -541,7 +542,8 @@ class Simulator(gym.Env):
       # Add an effort cost to reward
       effort_cost = self.bm_model.get_effort_cost(self._model, self._data)
       info["EffortCost"] = effort_cost
-      reward -= effort_cost
+      if self._subtract_effort_cost:
+        reward -= effort_cost
 
       # Get observation
       obs = self.get_observation(info)
@@ -580,7 +582,8 @@ class Simulator(gym.Env):
       # Add an effort cost to reward
       effort_cost = self.bm_model.get_effort_cost(self._model, self._data)
       info["EffortCost"] = effort_cost
-      reward -= effort_cost
+      if self._subtract_effort_cost:
+        reward -= effort_cost
 
       # Get observation
       obs = self.get_observation(info)
