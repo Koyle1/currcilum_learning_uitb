@@ -8,6 +8,7 @@ simulation:
       shoulder_variant: "none"
       skull_rotation: [0.9961947, 0, 0, -0.0871557]
       fixed_reset: true
+      fixed_reset_qpos: [-0.93801, 0.85036, -0.48469, 2.04969, -0.92662, 0.0, 0.0]
       effort_on: false
       effort_model:
         cls: "CumulativeFatigue3CCr"

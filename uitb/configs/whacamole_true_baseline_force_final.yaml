@@ -1,4 +1,4 @@
-simulator_name: "whacamole_without_stage_full_curriculum_3"
+simulator_name: "whacamole_true_baseline_force_final"
 project: "unity"
 
 simulation:
@@ -17,10 +17,10 @@ simulation:
   task:
     cls: "UnityEnv"
     kwargs:
-      curriculum_stage: 3
+      curriculum_stage: 2
       reset_policy: "episode_anchor_then_baseline"
       soft_reset_budget: 4
-      unity_executable: "apps/whac-a-mole-linux-curriculum-3/build.x86_64"
+      unity_executable: "apps/whac-a-mole-linux-curriculum/build.x86_64"
       app_args: ["-condition", "random-unconstrained", "-adaptive"]
       standalone: true # set to False for debugging (open the app in Unity editor)
       #port: 5555 # uncomment for debugging (connects to this port instead of finding a random open one)
@@ -62,7 +62,7 @@ rl:
     log_std_init: 0.0
     features_extractor_class: "feature_extractor.FeatureExtractor"
     normalize_images: False
-  lr: 
+  lr:
     function: "schedule.linear_schedule"
     kwargs:
       initial_value: 5e-5

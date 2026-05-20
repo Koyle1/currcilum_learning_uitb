@@ -97,6 +97,9 @@ class BaseBMModel(ABC):
 
     # Keep the reset deterministic when needed, and allow the simulator to inject an anchor state.
     self._fixed_reset = kwargs.get("fixed_reset", False)
+    self._fixed_reset_qpos = kwargs.get("fixed_reset_qpos", None)
+    if self._fixed_reset_qpos is not None:
+      self._fixed_reset_qpos = np.array(self._fixed_reset_qpos, dtype=float)
     self._reset_anchor = None
 
     # Define signal-dependent noise
@@ -147,6 +150,19 @@ class BaseBMModel(ABC):
 
     # Keep the canonical MuJoCo reset state when requested.
     if self._fixed_reset:
+      if self._fixed_reset_qpos is not None:
+        qpos = self._fixed_reset_qpos.copy()
+        if qpos.shape[0] > len(self._independent_qpos):
+          raise ValueError(
+            f"fixed_reset_qpos has length {qpos.shape[0]}, but the model exposes {len(self._independent_qpos)} independent qpos"
+          )
+        if qpos.shape[0] < len(self._independent_qpos):
+          qpos = np.pad(qpos, (0, len(self._independent_qpos) - qpos.shape[0]))
+        data.qpos[self._dependent_qpos] = 0
+        data.qpos[self._independent_qpos] = qpos
+        data.qvel[self._dependent_dofs] = 0
+        data.qvel[self._independent_dofs] = 0
+
       data.ctrl[:] = 0
       if self._na > 0:
         data.act[self._muscle_actuators] = 0
