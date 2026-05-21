@@ -35,6 +35,9 @@ class BaseEffortModel(ABC):
     return dict()
 
   def _effort_enabled(self):
+    task = getattr(self._bm_model, "task", None)
+    if task is not None and hasattr(task, "_effort_on"):
+      return bool(task._effort_on)
     return getattr(self._bm_model, "effort_on", getattr(self._bm_model, "_effort_on", True))
 
   def _disabled_cost(self):

@@ -18,8 +18,8 @@ simulation:
     cls: "UnityEnv"
     kwargs:
       curriculum_stage: 3
-      reset_policy: "episode_anchor_then_baseline"
-      soft_reset_budget: 4
+      effort_on: true
+      reset_policy: "continuous_sequence"
       unity_executable: "apps/whac-a-mole-linux-curriculum-3/build.x86_64"
       app_args: ["-condition", "random-unconstrained", "-adaptive"]
       standalone: true # set to False for debugging (open the app in Unity editor)

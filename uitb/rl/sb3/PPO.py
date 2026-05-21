@@ -182,6 +182,10 @@ class PPO_sb3_customlogs(PPO_sb3):
 
             self.train()
 
+            for cb in self.callbacks:
+                if hasattr(cb, "on_policy_update"):
+                    cb.on_policy_update()
+
         callback.on_training_end()
 
         return self
@@ -354,4 +358,3 @@ def make_vec_env(
     # Prepare the seeds for the first reset
     vec_env.seed(seed)
     return vec_env
-

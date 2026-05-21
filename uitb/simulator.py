@@ -32,6 +32,11 @@ class Simulator(gym.Env):
 
   # May be useful for later, the three digit number suffix is of format X.Y.Z where X is a major version.
   version = "1.1.0"
+  curriculum_stage_presets = {
+    1: {"effort_on": False, "reset_policy": "baseline", "soft_reset_budget": None},
+    2: {"effort_on": True, "reset_policy": "episode_anchor_then_baseline", "soft_reset_budget": 4},
+    3: {"effort_on": True, "reset_policy": "continuous_sequence", "soft_reset_budget": None},
+  }
 
   @classmethod
   def get_class(cls, *args):
@@ -262,6 +267,8 @@ class Simulator(gym.Env):
     # (e.g. move target to a specific position wrt to a body part)
     task = task_cls(model, data, **{**task_kwargs, **callbacks, **run_parameters})
     bm_model = bm_cls(model, data, **{**bm_kwargs, **callbacks, **run_parameters})
+    task.bm_model = bm_model
+    bm_model.task = task
     if hasattr(task, "_effort_on"):
       bm_model._effort_on = task._effort_on
     perception = Perception(model, data, bm_model, perception_modules, {**callbacks, **run_parameters})
@@ -369,6 +376,48 @@ class Simulator(gym.Env):
     self.bm_model.update(self._model, self._data)
     mujoco.mj_forward(self._model, self._data)
 
+  def get_curriculum_status(self):
+    """Return the current curriculum state and the latest Unity-reported metrics."""
+    task_info = getattr(self.task, "_info", {}) or {}
+    return {
+      "curriculum_stage": int(getattr(self.task, "_curriculum_stage", -1)),
+      "effort_on": bool(getattr(self.task, "_effort_on", False)),
+      "reset_policy": getattr(self.task, "_reset_policy", "legacy"),
+      "soft_reset_budget": getattr(self.task, "_soft_reset_budget", None),
+      "soft_reset_count": int(getattr(self.task, "_soft_reset_count", 0)),
+      "difficulty_level": task_info.get("difficulty_level", np.nan),
+      "global_successrate": task_info.get("global_successrate", np.nan),
+      "global_failrate": task_info.get("global_failrate", np.nan),
+      "Points": task_info.get("Points", np.nan),
+    }
+
+  def set_curriculum_stage(self, curriculum_stage):
+    """Synchronize the curriculum stage across the task and biomechanical model."""
+    curriculum_stage = int(curriculum_stage)
+    if curriculum_stage not in self.curriculum_stage_presets:
+      raise ValueError(f"Unsupported curriculum stage: {curriculum_stage}")
+
+    preset = self.curriculum_stage_presets[curriculum_stage]
+    self.task._curriculum_stage = curriculum_stage
+    self.task._effort_on = preset["effort_on"]
+    self.task._reset_policy = preset["reset_policy"]
+    self.task._soft_reset_budget = preset["soft_reset_budget"]
+    self.task._soft_reset_count = 0
+    if hasattr(self.task, "_info") and isinstance(self.task._info, dict):
+      self.task._info["curriculum_stage"] = curriculum_stage
+      self.task._info["effort_on"] = preset["effort_on"]
+      self.task._info["soft_reset_count"] = self.task._soft_reset_count
+
+    self._reset_policy = preset["reset_policy"]
+    self._soft_reset_budget = preset["soft_reset_budget"]
+
+    if hasattr(self.bm_model, "_effort_on"):
+      self.bm_model._effort_on = preset["effort_on"]
+    if hasattr(self.bm_model, "effort_on"):
+      self.bm_model.effort_on = preset["effort_on"]
+    if hasattr(self.bm_model, "_effort_model") and hasattr(self.bm_model._effort_model, "reset"):
+      self.bm_model._effort_model.reset(self._model, self._data)
+
   def __init__(self, simulator_folder, render_mode="rgb_array", render_mode_perception="embed", render_show_depths=False, run_parameters=None):
     """ Initialise a new `Simulator`.
 
@@ -418,6 +467,7 @@ class Simulator(gym.Env):
     self._baseline_anchor = None
     self._episode_start_anchor = None
     self._soft_reset_count = 0
+    self._last_attempt_anchor = None
 
     # Initialise viewer
     self._GUI_camera = Camera(self._run_parameters["rendering_context"], self._model, self._data, camera_id='for_testing',
@@ -536,8 +586,10 @@ class Simulator(gym.Env):
       reward, terminated, truncated, info = self.task.update(self._model, self._data)
 
       attempt_success = bool(info.get("attempt_success", info.get("Points", 0) > 0))
+      if terminated or truncated:
+        self._last_attempt_anchor = self._capture_success_anchor()
       if terminated and attempt_success:
-        self._last_success_anchor = self._capture_success_anchor()
+        self._last_success_anchor = copy.deepcopy(self._last_attempt_anchor)
 
       # Add an effort cost to reward
       effort_cost = self.bm_model.get_effort_cost(self._model, self._data)
@@ -576,8 +628,10 @@ class Simulator(gym.Env):
       reward, terminated, truncated, info = self.task.update(self._model, self._data)
 
       attempt_success = bool(info.get("attempt_success", info.get("Points", 0) > 0))
+      if terminated or truncated:
+        self._last_attempt_anchor = self._capture_success_anchor()
       if terminated and attempt_success:
-        self._last_success_anchor = self._capture_success_anchor()
+        self._last_success_anchor = copy.deepcopy(self._last_attempt_anchor)
 
       # Add an effort cost to reward
       effort_cost = self.bm_model.get_effort_cost(self._model, self._data)
@@ -655,6 +709,7 @@ class Simulator(gym.Env):
       # Full canonical reset.
       _reset_to_canonical()
       self._last_success_anchor = None
+      self._last_attempt_anchor = None
       self._baseline_anchor = self._capture_success_anchor()
       self._episode_start_anchor = copy.deepcopy(self._baseline_anchor)
       self._soft_reset_count = 0
@@ -676,6 +731,9 @@ class Simulator(gym.Env):
         else:
           restore_anchor = self._episode_start_anchor
           use_canonical = restore_anchor is None
+      elif reset_policy == "continuous_sequence":
+        restore_anchor = self._last_attempt_anchor if self._last_attempt_anchor is not None else self._episode_start_anchor
+        use_canonical = restore_anchor is None
       elif reset_policy == "legacy":
         if self._last_success_anchor is not None:
           restore_anchor = self._last_success_anchor
@@ -691,6 +749,7 @@ class Simulator(gym.Env):
         _reset_to_canonical()
         self._baseline_anchor = self._capture_success_anchor()
         self._soft_reset_count = 0
+        self._last_attempt_anchor = None
         if self._episode_start_anchor is None or reset_policy in {"baseline", "episode_anchor_then_baseline"}:
           self._episode_start_anchor = copy.deepcopy(self._baseline_anchor)
       else:

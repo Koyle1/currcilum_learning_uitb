@@ -92,6 +92,76 @@ class LinearCurriculum(BaseCallback):
     pass
 
 
+class AveragedWorkerCurriculumCallback(BaseCallback):
+  """
+  Advance the curriculum stage after each policy update using the mean metric across workers.
+
+  The callback expects the VecEnv workers to expose ``get_curriculum_status`` and
+  ``set_curriculum_stage`` methods on the underlying simulator.
+  """
+
+  def __init__(self, name, success_threshold=0.8, metric_key="global_successrate", max_stage=3, verbose=0):
+    super().__init__(verbose)
+    self.name = name
+    self.success_threshold = success_threshold
+    self.metric_key = metric_key
+    self.max_stage = max_stage
+    self._last_mean_metric = None
+    self._last_stage = None
+    self._last_next_stage = None
+
+  def _on_training_start(self) -> None:
+    pass
+
+  def _on_rollout_start(self) -> None:
+    pass
+
+  def _on_step(self) -> bool:
+    return True
+
+  def _on_rollout_end(self) -> None:
+    pass
+
+  def _on_training_end(self) -> None:
+    pass
+
+  def on_policy_update(self) -> None:
+    if self.model is None or getattr(self.model, "env", None) is None:
+      return
+
+    status_list = self.model.env.env_method("get_curriculum_status")
+    if len(status_list) == 0:
+      return
+
+    stage_values = [status.get("curriculum_stage", np.nan) for status in status_list]
+    stage_values = [float(stage) for stage in stage_values if stage is not None and not np.isnan(stage)]
+    if len(stage_values) == 0:
+      return
+
+    metric_values = [status.get(self.metric_key, np.nan) for status in status_list]
+    metric_values = [float(value) for value in metric_values if value is not None and not np.isnan(value)]
+    if len(metric_values) == 0:
+      return
+
+    current_stage = int(round(np.mean(stage_values)))
+    mean_metric = float(np.mean(metric_values))
+    next_stage = current_stage
+
+    if current_stage < self.max_stage and mean_metric >= self.success_threshold:
+      next_stage = current_stage + 1
+      self.model.env.env_method("set_curriculum_stage", next_stage)
+
+    self._last_mean_metric = mean_metric
+    self._last_stage = current_stage
+    self._last_next_stage = next_stage
+
+    if self.logger is not None:
+      self.logger.record("curriculum/current_stage", current_stage)
+      self.logger.record(f"curriculum/{self.metric_key}_mean", mean_metric)
+      self.logger.record("curriculum/next_stage", next_stage)
+      self.logger.record("curriculum/stage_switched", float(next_stage != current_stage))
+
+
 # class CustomTrainLogCallback(BaseCallback):
 #     """
 #     Log custom values from training envs at each time step.

@@ -9,6 +9,7 @@ simulation:
       skull_rotation: [0.9961947, 0, 0, -0.0871557]
       fixed_reset: true
       fixed_reset_qpos: [-0.93801, 0.85036, -0.48469, 2.04969, -0.92662, 0.0, 0.0]
+      blocked_muscles: ["SUP", "ECRL", "ECRB", "ECU", "FCR", "FCU", "PL", "PT", "PQ"]
       effort_on: false
       effort_model:
         cls: "CumulativeFatigue3CCr"
@@ -18,6 +19,7 @@ simulation:
     cls: "UnityEnv"
     kwargs:
       curriculum_stage: 1
+      effort_on: false
       reset_policy: "baseline"
       unity_executable: "apps/whac-a-mole-linux-curriculum/build.x86_64"
       app_args: ["-condition", "random-unconstrained", "-adaptive"]
@@ -43,6 +45,13 @@ simulation:
   run_parameters:
     action_sample_freq: 20
     subtract_effort_cost: false
+    callbacks:
+      - name: "curriculum_stage_controller"
+        cls: "rl.sb3.callbacks.AveragedWorkerCurriculumCallback"
+        kwargs:
+          success_threshold: 0.8
+          metric_key: "global_successrate"
+          max_stage: 3
     info_keywords: [["Points", "final"], ["RewardUnsuccessfulContact", "sum"], ["DistanceReward", "sum"], ["EffortCost", "sum"],
       ["failrateTarget0", "final"], ["failrateTarget1", "final"], ["failrateTarget2", "final"],
       ["failrateTarget3", "final"], ["failrateTarget4", "final"], ["failrateTarget5", "final"],

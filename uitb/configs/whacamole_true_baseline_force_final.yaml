@@ -18,6 +18,7 @@ simulation:
     cls: "UnityEnv"
     kwargs:
       curriculum_stage: 2
+      effort_on: true
       reset_policy: "episode_anchor_then_baseline"
       soft_reset_budget: 4
       unity_executable: "apps/whac-a-mole-linux-curriculum/build.x86_64"

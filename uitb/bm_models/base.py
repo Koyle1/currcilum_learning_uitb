@@ -57,6 +57,20 @@ class BaseBMModel(ABC):
     self._motor_actuators = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, actuator_name)
                             for actuator_name in self._motor_actuator_names]
 
+    # Optionally block a subset of muscles during a curriculum stage.
+    self._blocked_muscle_names = list(kwargs.get("blocked_muscles", []))
+    self._blocked_muscle_mask = np.zeros((len(self._muscle_actuators),), dtype=bool)
+    if self._blocked_muscle_names:
+      name_to_index = {name: idx for idx, name in enumerate(self._muscle_actuator_names)}
+      unknown = [name for name in self._blocked_muscle_names if name not in name_to_index]
+      if unknown:
+        raise KeyError(f"Unknown blocked muscles: {unknown}")
+      for name in self._blocked_muscle_names:
+        self._blocked_muscle_mask[name_to_index[name]] = True
+    self._blocked_muscle_actuators = [self._muscle_actuators[idx]
+                                      for idx, blocked in enumerate(self._blocked_muscle_mask)
+                                      if blocked]
+
     # Get joint names (dependent and independent)
     self._joint_names = [mujoco.mj_id2name(bm_model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(bm_model.njnt)]
     self._dependent_joint_names = {self._joint_names[idx] for idx in
@@ -191,6 +205,9 @@ class BaseBMModel(ABC):
     # Reset smoothed average of motor actuator activation
     self._motor_smooth_avg = np.zeros((self._nm,))
 
+    if self._blocked_muscle_actuators:
+      data.act[self._blocked_muscle_actuators] = 0
+
     # Reset accumulative noise
     self._sigdepnoise_acc = 0
     self._constantnoise_acc = 0
@@ -276,6 +293,9 @@ class BaseBMModel(ABC):
             _selected_muscle_control += self._constantnoise_acc
         else:
             raise NotImplementedError(f"{self._constantnoise_type}")
+
+    if self._blocked_muscle_mask.any():
+      _selected_muscle_control[self._blocked_muscle_mask] = 0
 
     # Update smoothed online estimate of motor actuation
     self._motor_act = (1 - self._motor_alpha) * self._motor_act \
