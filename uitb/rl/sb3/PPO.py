@@ -131,7 +131,29 @@ class PPO(BaseRLModel):
                          reset_num_timesteps=not self.training_resumed)
 
 class PPO_sb3_customlogs(PPO_sb3):
-   def learn(
+    def _notify_policy_update_callbacks(self, callback):
+        if callback is None:
+            return
+
+        if isinstance(callback, (list, tuple)):
+            for child in callback:
+                self._notify_policy_update_callbacks(child)
+            return
+
+        if hasattr(callback, "callbacks"):
+            for child in callback.callbacks:
+                self._notify_policy_update_callbacks(child)
+
+        if hasattr(callback, "callback") and callback.callback is not None:
+            self._notify_policy_update_callbacks(callback.callback)
+
+        if hasattr(callback, "callback_on_new_best") and callback.callback_on_new_best is not None:
+            self._notify_policy_update_callbacks(callback.callback_on_new_best)
+
+        if hasattr(callback, "on_policy_update"):
+            callback.on_policy_update()
+
+    def learn(
         self: SelfPPO,
         total_timesteps: int,
         callback: MaybeCallback = None,
@@ -182,9 +204,7 @@ class PPO_sb3_customlogs(PPO_sb3):
 
             self.train()
 
-            for cb in self.callbacks:
-                if hasattr(cb, "on_policy_update"):
-                    cb.on_policy_update()
+            self._notify_policy_update_callbacks(callback)
 
         callback.on_training_end()
 
