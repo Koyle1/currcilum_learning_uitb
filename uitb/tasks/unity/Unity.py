@@ -24,8 +24,8 @@ class UnityEnv(BaseTask):
 
     self._needs_hard_reset = True
     self._hard_reset_step_count = 0
-    self._curriculum_stage = kwargs.get("curriculum_stage", None)
-    self._effort_on = kwargs.get("effort_on", kwargs.get("curriculum_stage", None) != 1)
+    self._curriculum_stage = kwargs.get("curriculum_stage", 0)
+    self._effort_on = kwargs.get("effort_on", kwargs.get("curriculum_stage", 0) != 0)
     self._reset_policy = kwargs.get("reset_policy", "legacy")
     self._soft_reset_budget = kwargs.get("soft_reset_budget", None)
     self._soft_reset_count = 0

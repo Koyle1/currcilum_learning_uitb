@@ -100,7 +100,7 @@ class AveragedWorkerCurriculumCallback(BaseCallback):
   ``set_curriculum_stage`` methods on the underlying simulator.
   """
 
-  def __init__(self, name, success_threshold=0.8, metric_key="global_successrate", max_stage=3, verbose=0):
+  def __init__(self, name, success_threshold=0.8, metric_key="global_successrate", max_stage=2, verbose=0):
     super().__init__(verbose)
     self.name = name
     self.success_threshold = success_threshold

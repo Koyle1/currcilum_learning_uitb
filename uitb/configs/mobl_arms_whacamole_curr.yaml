@@ -17,7 +17,7 @@ simulation:
   task:
     cls: "UnityEnv"
     kwargs:
-      curriculum_stage: 2
+      curriculum_stage: 1
       effort_on: true
       reset_policy: "episode_anchor_then_baseline"
       soft_reset_budget: 4

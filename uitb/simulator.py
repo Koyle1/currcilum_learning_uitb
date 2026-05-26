@@ -33,9 +33,9 @@ class Simulator(gym.Env):
   # May be useful for later, the three digit number suffix is of format X.Y.Z where X is a major version.
   version = "1.1.0"
   curriculum_stage_presets = {
-    1: {"effort_on": False, "reset_policy": "baseline", "soft_reset_budget": None},
-    2: {"effort_on": True, "reset_policy": "episode_anchor_then_baseline", "soft_reset_budget": 4},
-    3: {"effort_on": True, "reset_policy": "continuous_sequence", "soft_reset_budget": None},
+    0: {"effort_on": False, "reset_policy": "baseline", "soft_reset_budget": None},
+    1: {"effort_on": True, "reset_policy": "episode_anchor_then_baseline", "soft_reset_budget": 4},
+    2: {"effort_on": True, "reset_policy": "continuous_sequence", "soft_reset_budget": None},
   }
 
   @classmethod

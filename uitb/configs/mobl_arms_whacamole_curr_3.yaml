@@ -17,7 +17,7 @@ simulation:
   task:
     cls: "UnityEnv"
     kwargs:
-      curriculum_stage: 3
+      curriculum_stage: 2
       effort_on: true
       reset_policy: "continuous_sequence"
       unity_executable: "apps/whac-a-mole-linux-curriculum-3/build.x86_64"
